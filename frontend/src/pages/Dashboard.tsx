@@ -1,18 +1,40 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Calendar, Clock, MapPin, LogOut, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, LogOut, MapPin, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
 import { api, type Decision, type Schedule } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 
-const today = () => new Date().toISOString().split("T")[0];
+// ── date helpers ──────────────────────────────────────────────
+const todayStr = () => new Date().toISOString().split("T")[0];
 const fmt = (t: string) => t.slice(0, 5);
-const fmtDate = (d: string) =>
+const fmtLong = (d: string) =>
   new Date(d + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
+function weekStart(date: string): Date {
+  const d = new Date(date + "T00:00:00");
+  const dow = d.getDay();
+  const diff = dow === 0 ? -6 : 1 - dow; // anchor to Monday
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+
+function weekDates(anchor: Date): string[] {
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(anchor);
+    d.setDate(anchor.getDate() + i);
+    return d.toISOString().split("T")[0];
+  });
+}
+
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+// ── component ────────────────────────────────────────────────
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const date = today();
+
+  const [selectedDate, setSelectedDate] = useState(todayStr());
+  const [wStart, setWStart] = useState(() => weekStart(todayStr()));
 
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [decision, setDecision] = useState<Decision | null>(null);
@@ -21,19 +43,32 @@ export default function Dashboard() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
 
+  // Reload schedule + decision whenever the selected date changes
   useEffect(() => {
-    api.getSchedules(date)
+    setSchedules([]);
+    setDecision(null);
+    setLoadingSched(true);
+    setError("");
+    api.getSchedules(selectedDate)
       .then(setSchedules)
       .finally(() => setLoadingSched(false));
-    api.getDecisions(date).then((ds) => ds.length && setDecision(ds[0]));
-  }, []);
+    api.getDecisions(selectedDate).then((ds) => { if (ds.length) setDecision(ds[0]); });
+  }, [selectedDate]);
+
+  const selectDay = (d: string) => {
+    setSelectedDate(d);
+    setWStart(weekStart(d));
+  };
+
+  const prevWeek = () => setWStart((ws) => { const d = new Date(ws); d.setDate(d.getDate() - 7); return d; });
+  const nextWeek = () => setWStart((ws) => { const d = new Date(ws); d.setDate(d.getDate() + 7); return d; });
+  const goToday  = () => { const t = todayStr(); setSelectedDate(t); setWStart(weekStart(t)); };
 
   const getDecision = async () => {
     setLoadingDecision(true);
     setError("");
     try {
-      const d = await api.makeDecision(date);
-      setDecision(d);
+      setDecision(await api.makeDecision(selectedDate));
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -45,12 +80,11 @@ export default function Dashboard() {
     setSyncing(true);
     setError("");
     try {
-      const synced = await api.syncGoogle(date);
+      const synced = await api.syncGoogle(selectedDate);
       if (synced.length === 0) {
-        setError("No Google Calendar events found for today.");
+        setError("No Google Calendar events found for this date.");
       } else {
-        const all = await api.getSchedules(date);
-        setSchedules(all);
+        setSchedules(await api.getSchedules(selectedDate));
       }
     } catch (e: any) {
       if (e.message.includes("not connected")) {
@@ -69,12 +103,18 @@ export default function Dashboard() {
     setSchedules((s) => s.filter((e) => e.id !== id));
   };
 
-  const factors = decision?.factors ? JSON.parse(decision.factors) : null;
-  const isStay = decision?.recommendation === "stay";
+  const factors  = decision?.factors ? JSON.parse(decision.factors) : null;
+  const isStay   = decision?.recommendation === "stay";
+  const today    = todayStr();
+  const days     = weekDates(wStart);
+
+  // Month label for the week strip header
+  const monthLabel = wStart.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Nav */}
+
+      {/* ── Nav ── */}
       <header className="bg-white border-b border-slate-200 px-4 py-3">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -92,17 +132,70 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
-        {/* Date */}
+      <main className="max-w-2xl mx-auto px-4 py-5 space-y-4">
+
+        {/* ── Week strip ── */}
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+          {/* Month + controls */}
+          <div className="flex items-center justify-between px-4 pt-4 pb-2">
+            <button onClick={prevWeek} className="p-1 text-slate-400 hover:text-slate-700 transition-colors rounded-lg hover:bg-slate-100">
+              <ChevronLeft size={18} />
+            </button>
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-semibold text-slate-700">{monthLabel}</span>
+              {selectedDate !== today && (
+                <button onClick={goToday} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium px-2 py-0.5 bg-indigo-50 rounded-full transition-colors">
+                  Today
+                </button>
+              )}
+            </div>
+            <button onClick={nextWeek} className="p-1 text-slate-400 hover:text-slate-700 transition-colors rounded-lg hover:bg-slate-100">
+              <ChevronRight size={18} />
+            </button>
+          </div>
+
+          {/* Day cells */}
+          <div className="grid grid-cols-7 gap-1 px-3 pb-3">
+            {days.map((d, i) => {
+              const isSelected = d === selectedDate;
+              const isToday    = d === today;
+              const dayNum     = new Date(d + "T00:00:00").getDate();
+              return (
+                <button
+                  key={d}
+                  onClick={() => selectDay(d)}
+                  className={`flex flex-col items-center py-2 rounded-xl transition-all ${
+                    isSelected
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "hover:bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  <span className={`text-[10px] font-semibold uppercase tracking-wide mb-1 ${isSelected ? "text-indigo-200" : "text-slate-400"}`}>
+                    {DAY_LABELS[i]}
+                  </span>
+                  <span className={`text-sm font-bold leading-none ${isSelected ? "text-white" : isToday ? "text-indigo-600" : "text-slate-800"}`}>
+                    {dayNum}
+                  </span>
+                  {/* Today dot when not selected */}
+                  {isToday && !isSelected && (
+                    <span className="w-1 h-1 rounded-full bg-indigo-500 mt-1" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── Day heading ── */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold text-slate-900">{fmtDate(date)}</h1>
+            <h1 className="text-xl font-bold text-slate-900">{fmtLong(selectedDate)}</h1>
             <p className="text-sm text-slate-500 mt-0.5">
-              {user?.full_name ? `Hi, ${user.full_name.split(" ")[0]}` : "Good day"} · {user?.commute_minutes}min commute
+              {user?.full_name ? `${user.full_name.split(" ")[0]}` : "You"} · {user?.commute_minutes}min commute
             </p>
           </div>
           <button
-            onClick={() => navigate("/add")}
+            onClick={() => navigate("/add", { state: { date: selectedDate } })}
             className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors"
           >
             <Plus size={16} />
@@ -116,46 +209,50 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Decision Card */}
+        {/* ── Decision card ── */}
         {decision ? (
           <div className={`rounded-2xl p-5 ${isStay ? "bg-emerald-50 border border-emerald-200" : "bg-amber-50 border border-amber-200"}`}>
-            <div className="flex items-start justify-between mb-3">
+            <div className="flex items-start justify-between mb-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Today's recommendation</p>
-                <div className="flex items-center gap-2">
-                  <span className={`text-3xl font-bold ${isStay ? "text-emerald-700" : "text-amber-700"}`}>
-                    {isStay ? "Stay on campus" : "Go home"}
-                  </span>
-                </div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Recommendation</p>
+                <span className={`text-2xl font-bold ${isStay ? "text-emerald-700" : "text-amber-700"}`}>
+                  {isStay ? "Stay on campus" : "Go home"}
+                </span>
               </div>
-              <div className={`text-right`}>
+              <div className="text-right shrink-0">
                 <div className={`text-2xl font-bold ${isStay ? "text-emerald-600" : "text-amber-600"}`}>
                   {decision.confidence_score}%
                 </div>
-                <div className="text-xs text-slate-500">confidence</div>
+                <div className="text-xs text-slate-400">confidence</div>
               </div>
             </div>
 
             {/* Confidence bar */}
-            <div className="h-1.5 bg-white/60 rounded-full mb-3 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${isStay ? "bg-emerald-500" : "bg-amber-500"}`}
-                style={{ width: `${decision.confidence_score}%` }}
-              />
+            <div className="mb-4">
+              <div className="flex justify-between text-xs text-slate-400 mb-1.5">
+                <span>Confidence</span>
+                <span className="font-medium">{decision.confidence_score} / 100</span>
+              </div>
+              <div className="h-2.5 bg-white/70 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-700 ${isStay ? "bg-emerald-500" : "bg-amber-500"}`}
+                  style={{ width: `${decision.confidence_score}%` }}
+                />
+              </div>
             </div>
 
-            <p className="text-sm text-slate-700 leading-relaxed mb-3">{decision.reasoning}</p>
+            <p className="text-sm text-slate-700 leading-relaxed mb-4">{decision.reasoning}</p>
 
             {factors && (
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-3 gap-2 mb-3">
                 {[
-                  { label: "Events", value: factors.campus_events_count },
-                  { label: "Commute", value: `${factors.total_commute_minutes}min` },
-                  { label: "Largest gap", value: factors.largest_gap_minutes ? `${factors.largest_gap_minutes}min` : "—" },
+                  { label: "Events",       value: factors.campus_events_count },
+                  { label: "Commute",      value: `${factors.total_commute_minutes}min` },
+                  { label: "Largest gap",  value: factors.largest_gap_minutes ? `${factors.largest_gap_minutes}min` : "—" },
                 ].map(({ label, value }) => (
-                  <div key={label} className="bg-white/60 rounded-lg px-2 py-1.5 text-center">
-                    <div className="text-xs text-slate-500">{label}</div>
-                    <div className="text-sm font-semibold text-slate-800">{value}</div>
+                  <div key={label} className="bg-white/60 rounded-xl px-2 py-2 text-center">
+                    <div className="text-xs text-slate-500 mb-0.5">{label}</div>
+                    <div className="text-sm font-bold text-slate-800">{value}</div>
                   </div>
                 ))}
               </div>
@@ -164,7 +261,7 @@ export default function Dashboard() {
             <button
               onClick={getDecision}
               disabled={loadingDecision}
-              className="mt-3 text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1 transition-colors disabled:opacity-50"
+              className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1 transition-colors disabled:opacity-50"
             >
               <RefreshCw size={12} className={loadingDecision ? "animate-spin" : ""} />
               Regenerate
@@ -172,12 +269,12 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="bg-white border border-slate-200 rounded-2xl p-5">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-1.5">
               <Sparkles size={16} className="text-indigo-500" />
-              <span className="font-semibold text-slate-800 text-sm">Get today's recommendation</span>
+              <span className="font-semibold text-slate-800 text-sm">Get a recommendation</span>
             </div>
             <p className="text-sm text-slate-500 mb-4">
-              Claude will analyze your schedule and commute to decide if you should stay or go.
+              Claude will analyse your schedule and commute time to decide if you should stay or go.
             </p>
             <button
               onClick={getDecision}
@@ -192,12 +289,11 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Schedule */}
+        {/* ── Schedule list ── */}
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
             <div className="flex items-center gap-2">
-              <Calendar size={16} className="text-slate-400" />
-              <span className="font-semibold text-slate-800 text-sm">Today's schedule</span>
+              <span className="font-semibold text-slate-800 text-sm">Schedule</span>
               {schedules.length > 0 && (
                 <span className="bg-slate-100 text-slate-600 text-xs font-medium px-2 py-0.5 rounded-full">
                   {schedules.length}
@@ -218,9 +314,9 @@ export default function Dashboard() {
             <div className="px-5 py-8 text-center text-sm text-slate-400">Loading…</div>
           ) : schedules.length === 0 ? (
             <div className="px-5 py-10 text-center">
-              <p className="text-slate-400 text-sm">No events today.</p>
+              <p className="text-slate-400 text-sm">No events on this day.</p>
               <button
-                onClick={() => navigate("/add")}
+                onClick={() => navigate("/add", { state: { date: selectedDate } })}
                 className="mt-3 text-indigo-600 hover:text-indigo-700 text-sm font-medium"
               >
                 + Add an event
@@ -230,36 +326,27 @@ export default function Dashboard() {
             <ul className="divide-y divide-slate-100">
               {schedules.map((s) => (
                 <li key={s.id} className="flex items-start gap-4 px-5 py-4 group">
-                  {/* Time column */}
-                  <div className="w-20 shrink-0 text-right">
-                    {s.start_time ? (
-                      <span className="text-xs font-medium text-slate-500">{fmt(s.start_time)}</span>
-                    ) : (
-                      <span className="text-xs text-slate-400">All day</span>
-                    )}
+                  <div className="w-14 shrink-0 text-right pt-0.5">
+                    {s.start_time
+                      ? <span className="text-xs font-medium text-slate-500">{fmt(s.start_time)}</span>
+                      : <span className="text-xs text-slate-400">All day</span>}
                   </div>
-
-                  {/* Dot */}
-                  <div className="flex flex-col items-center pt-1">
-                    <div className={`w-2.5 h-2.5 rounded-full ${s.is_on_campus ? "bg-indigo-500" : "bg-slate-300"}`} />
+                  <div className="pt-1.5">
+                    <div className={`w-2 h-2 rounded-full ${s.is_on_campus ? "bg-indigo-500" : "bg-slate-300"}`} />
                   </div>
-
-                  {/* Details */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <p className="text-sm font-medium text-slate-900">{s.title}</p>
-                        <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                          {s.end_time && s.start_time && (
+                        <div className="flex flex-wrap items-center gap-3 mt-0.5">
+                          {s.start_time && s.end_time && (
                             <span className="flex items-center gap-1 text-xs text-slate-400">
-                              <Clock size={11} />
-                              {fmt(s.start_time)}–{fmt(s.end_time)}
+                              <Clock size={11} />{fmt(s.start_time)}–{fmt(s.end_time)}
                             </span>
                           )}
                           {s.location && (
                             <span className="flex items-center gap-1 text-xs text-slate-400">
-                              <MapPin size={11} />
-                              {s.location}
+                              <MapPin size={11} />{s.location}
                             </span>
                           )}
                           <span className={`text-xs font-medium ${s.is_on_campus ? "text-indigo-500" : "text-slate-400"}`}>
@@ -269,7 +356,7 @@ export default function Dashboard() {
                       </div>
                       <button
                         onClick={() => deleteSchedule(s.id)}
-                        className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-400 transition-all"
+                        className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-400 transition-all mt-0.5"
                       >
                         <Trash2 size={14} />
                       </button>

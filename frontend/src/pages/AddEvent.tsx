@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { api } from "../api";
 
@@ -7,10 +7,12 @@ const today = () => new Date().toISOString().split("T")[0];
 
 export default function AddEvent() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const prefillDate = (location.state as { date?: string } | null)?.date ?? today();
   const [form, setForm] = useState({
     title: "",
     description: "",
-    event_date: today(),
+    event_date: prefillDate,
     start_time: "",
     end_time: "",
     location: "",
