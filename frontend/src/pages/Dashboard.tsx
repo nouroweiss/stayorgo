@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Calendar, Clock, MapPin, LogOut, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
-import { api, Decision, Schedule } from "../api";
+import { api, type Decision, type Schedule } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 
 const today = () => new Date().toISOString().split("T")[0];

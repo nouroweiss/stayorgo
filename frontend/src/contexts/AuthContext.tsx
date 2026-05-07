@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { api, User } from "../api";
+import { api, type User } from "../api";
 
 interface AuthCtx {
   user: User | null;
