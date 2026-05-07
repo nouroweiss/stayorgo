@@ -11,6 +11,7 @@ from app.schemas.user import Token, UserCreate, UserOut, UserUpdate
 from app.services.auth import authenticate_user, create_access_token, get_user_by_email, hash_password
 from app.services.calendar import exchange_code_for_tokens, get_google_auth_url
 
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
@@ -55,15 +56,28 @@ def update_me(payload: UserUpdate, db: Session = Depends(get_db), current_user: 
 
 
 @router.get("/google")
-def google_auth():
-    return {"auth_url": get_google_auth_url()}
+def google_auth(current_user: User = Depends(get_current_user)):
+    """Returns a Google OAuth2 authorization URL. Visit it in a browser to connect your calendar."""
+    return {"auth_url": get_google_auth_url(current_user.id)}
 
 
 @router.get("/google/callback")
-def google_callback(code: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    tokens = exchange_code_for_tokens(code)
-    current_user.google_access_token = tokens["access_token"]
-    current_user.google_refresh_token = tokens["refresh_token"]
-    current_user.google_token_expiry = tokens["expiry"]
+def google_callback(code: str, state: str, db: Session = Depends(get_db)):
+    """
+    Google redirects here after authorization. The signed state encodes the user_id
+    so no Bearer token is needed on this browser-facing endpoint.
+    """
+    try:
+        user_id, tokens = exchange_code_for_tokens(code, state)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.google_access_token = tokens["access_token"]
+    user.google_refresh_token = tokens["refresh_token"]
+    user.google_token_expiry = tokens["expiry"]
     db.commit()
-    return {"message": "Google Calendar connected successfully"}
+    return {"message": "Google Calendar connected successfully", "user_id": user_id}
